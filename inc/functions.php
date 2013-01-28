@@ -6,6 +6,7 @@ function lz_autologin($row)
 
 
 	$rusername = $row['user_name'];
+	$rmdpass = $row['user_password'];
 	if ($row['user_maingrp'] == -1)
 	{
 		cot_log("Log in attempt, user inactive : " . $rusername, 'usr');
@@ -30,25 +31,29 @@ function lz_autologin($row)
 	}
 
 	$ruserid = $row['user_id'];
-	$rdefskin = $row['user_skin'];
-	$rdeftheme = $row['user_theme'];
+	// $rdeftheme = $row['user_theme'];
+	// $rdefscheme = $row['user_scheme'];
 
 	$token = cot_unique(16);
-	$sid = cot_unique(32);
+
+	$sid = hash_hmac('sha256', $rmdpass . $row['user_sidtime'], $cfg['secret_key']);
 
 	if (empty($row['user_sid']) || $row['user_sid'] != $sid
-		|| $row['user_sidtime'] + $cfg['cookielifetime'] < $sys['now_offset'])
+		|| $row['user_sidtime'] + $cfg['cookielifetime'] < $sys['now'])
 	{
 		// Generate new session identifier
-		$sid = hash_hmac('sha256', $ruser_vk_id.$sys['now_offset'], $cfg['secret_key']);
-		$update_sid = ", user_sid = ".$db->quote($sid).", user_sidtime = ".$sys['now_offset'];
+		$sid = hash_hmac('sha256', $rmdpass . $sys['now'], $cfg['secret_key']);
+		$update_sid = ", user_sid = " . $db->quote($sid) . ", user_sidtime = " . $sys['now'];
 	}
 	else
 	{
 		$update_sid = '';
 	}
 
-	$db->query("UPDATE $db_users SET user_lastip='{$usr['ip']}', user_lastlog = {$sys['now_offset']}, user_logcount = user_logcount + 1, user_token = '$token' $update_sid WHERE user_id={$row['user_id']}");
+	$db->query("UPDATE $db_users SET user_lastip='{$usr['ip']}', user_lastlog = {$sys['now']}, user_logcount = user_logcount + 1, user_token = '$token' $update_sid WHERE user_id={$row['user_id']}");
+
+	// Hash the sid once more so it can't be faked even if you  know user_sid
+	$sid = hash_hmac('sha1', $sid, $cfg['secret_key']);
 
 	$u = base64_encode($ruserid.':'.$sid);
 
@@ -61,13 +66,9 @@ function lz_autologin($row)
 		$_SESSION[$sys['site_id']] = $u;
 	}
 	/* === Hook === */
-	$extp = cot_getextplugins('users.auth.check.done');
-	if (is_array($extp))
+	foreach (cot_getextplugins('users.auth.check.done') as $pl)
 	{
-		foreach ($extp as $k => $pl)
-		{
-			include_once($cfg['plugins_dir'] . '/' . $pl['pl_code'] . '/' . $pl['pl_file'] . '.php');
-		}
+		include $pl;
 	}
 	/* ===== */
 
